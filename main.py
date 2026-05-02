@@ -10,8 +10,7 @@ from groq import Groq
 from prompt import SYSTEM_PROMPT
 
 app = FastAPI()
-groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-
+groq_client = None
 collection = None
 
 def get_simple_embedding(text, size=384):
@@ -27,7 +26,14 @@ def get_simple_embedding(text, size=384):
 
 @app.on_event("startup")
 async def startup_event():
-    global collection
+    global collection, groq_client
+
+    api_key = os.environ.get("GROQ_API_KEY")
+    print(f"GROQ_API_KEY found: {bool(api_key)}")
+    if api_key:
+        groq_client = Groq(api_key=api_key)
+        print(f"Groq ready: {api_key[:8]}...")
+
     from startup import build_db_if_needed
     build_db_if_needed()
     db_client = chromadb.PersistentClient(path="./geeta_db")
