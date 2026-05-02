@@ -3,18 +3,31 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List
 import chromadb
-from sentence_transformers import SentenceTransformer
+import hashlib
+import math
+import os
 from groq import Groq
 from prompt import SYSTEM_PROMPT
 from startup import build_db_if_needed
+
 build_db_if_needed()
 
 app = FastAPI()
-model = SentenceTransformer("all-MiniLM-L6-v2")
 client = chromadb.PersistentClient(path="./geeta_db")
 collection = client.get_collection("shlokas")
-import os
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+def get_simple_embedding(text, size=384):
+    words = text.lower().split()
+    vector = [0.0] * size
+    for i, word in enumerate(words):
+        hash_val = int(hashlib.md5(word.encode()).hexdigest(), 16)
+        for j in range(min(5, size)):
+            idx = (hash_val + i * 7 + j * 13) % size
+            vector[idx] += 1.0 / (i + 1)
+    magnitude = math.sqrt(sum(x*x for x in vector)) or 1.0
+    return [x / magnitude for x in vector]
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -31,8 +44,7 @@ def home():
 def chat(req: ChatRequest):
     import traceback
     try:
-        # Step 1: Find matching shlokas
-        query_embedding = model.encode(req.message).tolist()
+        query_embedding = get_simple_embedding(req.message)
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=3
@@ -48,15 +60,10 @@ Themes: {meta['themes']}
 Neuroscience: {meta['neuroscience_link']}
 """
 
-        # Step 2: Build messages with full history
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        print(f"History received: {len(req.history)} messages")
-
-        # Add conversation history (last 6 messages to save tokens)
         for msg in req.history[-6:]:
             messages.append({"role": msg.role, "content": msg.content})
 
-        # Add current message with shloka context
         user_prompt = f"""The person says: "{req.message}"
 
 Relevant Bhagavad Gita shlokas:
@@ -66,7 +73,6 @@ Respond as GeetaAI using the most fitting shloka."""
 
         messages.append({"role": "user", "content": user_prompt})
 
-        # Step 3: Try big model first, fall back to smaller
         response = None
         for model_name in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
             try:
@@ -81,11 +87,10 @@ Respond as GeetaAI using the most fitting shloka."""
                 continue
 
         if response is None:
-            return {"response": "GeetaAI is resting for now. Please try again in a few minutes. 🙏"}
+            return {"response": "GeetaAI is resting. Please try again in a few minutes. 🙏"}
 
         return {"response": response.choices[0].message.content}
 
     except Exception as e:
-        error_details = traceback.format_exc()
-        print("FULL ERROR:\n", error_details)
+        print("ERROR:", traceback.format_exc())
         return {"response": f"Something went wrong: {str(e)}"}
