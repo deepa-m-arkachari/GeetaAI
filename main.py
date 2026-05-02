@@ -28,7 +28,7 @@ def get_simple_embedding(text, size=384):
 async def startup_event():
     global collection, groq_client
 
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY") or "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"
     print(f"GROQ_API_KEY found: {bool(api_key)}")
     if api_key:
         groq_client = Groq(api_key=api_key)
